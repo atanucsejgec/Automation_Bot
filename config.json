@@ -1,0 +1,15 @@
+{
+    "loop_count": 5,
+    "delay_between_loops": 10.0,
+    "playback_speed": 1.0,
+    "recording_hotkey_start": "F6",
+    "recording_hotkey_stop": "F7",
+    "abort_hotkey": "F8",
+    "target_window_title": "Clash of Clans",
+    "recordings_dir": "recordings",
+    "click_delay_offset": 0.0,
+    "mouse_move_duration": 0.1,
+    "confidence_threshold": 0.8,
+    "pre_attack_delay": 2.0,
+    "post_attack_delay": 5.0
+}
