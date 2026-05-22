@@ -1,8 +1,8 @@
 """
-main.py — CLI entry point for the Clash of Clans attack bot.
+main.py — CLI entry point for the Macro Recorder & Player.
 
 Provides an interactive menu to:
-  1. Record a new attack sequence
+  1. Record a new action sequence
   2. Replay a saved recording
   3. List saved recordings
   4. Take a screenshot (for template images)
@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import time
+from sounds import pregenerate_all
 
 # Resolve paths relative to this file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,12 +40,10 @@ def load_config() -> dict:
         "recording_hotkey_start": "F6",
         "recording_hotkey_stop": "F7",
         "abort_hotkey": "F8",
-        "target_window_title": "Google Play Games",
         "recordings_dir": "recordings",
         "mouse_move_duration": 0.1,
-        "confidence_threshold": 0.8,
-        "pre_attack_delay": 2.0,
-        "post_attack_delay": 5.0,
+        "countdown_seconds": 10,
+        "sound_enabled": True,
     }
 
 
@@ -64,7 +63,7 @@ def print_banner():
     banner = r"""
     ╔══════════════════════════════════════════════════════════════╗
     ║                                                              ║
-    ║       ⚔️   CLASH OF CLANS — ATTACK BOT  ⚔️                  ║
+    ║       🎮  MACRO RECORDER & PLAYER  🎮                       ║
     ║                                                              ║
     ║       Record · Replay · Automate                             ║
     ║                                                              ║
@@ -150,10 +149,11 @@ def action_record(config: dict):
     name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
     stop_key = config.get("recording_hotkey_stop", "F7")
-    print(f"\n  Get ready! Recording will start in 3 seconds...")
+    countdown = config.get("countdown_seconds", 10)
+    print(f"\n  Get ready! Recording will start in {countdown} seconds...")
     print(f"  Press {stop_key} to stop recording.\n")
 
-    for i in range(3, 0, -1):
+    for i in range(countdown, 0, -1):
         print(f"    {i}...")
         time.sleep(1)
 
@@ -274,8 +274,9 @@ def action_replay(config: dict):
         play_config["playback_speed"] = speed
 
         abort_key = config.get("abort_hotkey", "F8")
-        print(f"\n  Starting replay in 3 seconds... (press {abort_key} to abort)\n")
-        for i in range(3, 0, -1):
+        countdown = config.get("countdown_seconds", 10)
+        print(f"\n  Starting replay in {countdown} seconds... (press {abort_key} to abort)\n")
+        for i in range(countdown, 0, -1):
             print(f"    {i}...")
             time.sleep(1)
 
@@ -308,8 +309,9 @@ def action_replay(config: dict):
         play_config["playback_speed"] = speed
 
         abort_key = config.get("abort_hotkey", "F8")
-        print(f"\n  🎲 Starting RANDOM replay in 3 seconds... (press {abort_key} to abort)\n")
-        for i in range(3, 0, -1):
+        countdown = config.get("countdown_seconds", 10)
+        print(f"\n  🎲 Starting RANDOM replay in {countdown} seconds... (press {abort_key} to abort)\n")
+        for i in range(countdown, 0, -1):
             print(f"    {i}...")
             time.sleep(1)
 
@@ -396,11 +398,9 @@ def action_edit_config(config: dict) -> dict:
         ("playback_speed",      "Playback speed",       float),
         ("recording_hotkey_stop", "Stop recording hotkey", str),
         ("abort_hotkey",        "Abort replay hotkey",  str),
-        ("target_window_title", "Target window title",  str),
-        ("pre_attack_delay",    "Pre-attack delay (s)", float),
-        ("post_attack_delay",   "Post-attack delay (s)", float),
         ("mouse_move_duration", "Mouse move duration (s)", float),
-        ("confidence_threshold","Image match threshold", float),
+        ("countdown_seconds",   "Countdown seconds",    int),
+        ("sound_enabled",       "Sound announcements",  bool),
     ]
 
     for i, (key, label, _) in enumerate(editable, 1):
@@ -419,7 +419,10 @@ def action_edit_config(config: dict) -> dict:
             current = config.get(key, "")
             new_val = input(f"  New value for '{label}' [{current}]: ").strip()
             if new_val:
-                config[key] = typ(new_val)
+                if typ == bool:
+                    config[key] = new_val.lower() in ("true", "1", "yes", "on")
+                else:
+                    config[key] = typ(new_val)
                 save_config(config)
             else:
                 print("  No change.\n")
@@ -441,6 +444,10 @@ def main():
     # Ensure recordings directory exists
     os.makedirs(os.path.join(BASE_DIR, config.get("recordings_dir", "recordings")),
                 exist_ok=True)
+
+    # Pre-generate sound files on first run
+    if config.get("sound_enabled", True):
+        pregenerate_all()
 
     while True:
         print_menu()

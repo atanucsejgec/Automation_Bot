@@ -26,6 +26,7 @@ from datetime import datetime
 
 from pynput import mouse, keyboard
 from pynput.keyboard import Key, KeyCode
+from sounds import play_announcement, play_announcement_sync
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +202,7 @@ class ActionRecorder:
 
         stop_key = self.config.get("recording_hotkey_stop", "F7")
         print(f"[recorder] 🔴 Recording started.  Press {stop_key} to stop.")
+        play_announcement_sync("recording_started", self.config.get("sound_enabled", True))
 
     def wait(self):
         """Block until the stop hotkey is pressed."""
@@ -220,6 +222,7 @@ class ActionRecorder:
         total = len(self.actions)
         duration = self.actions[-1]["time"] if self.actions else 0
         print(f"[recorder] ⏹  Recording stopped.  {total} events over {duration:.2f}s")
+        play_announcement("recording_stopped", self.config.get("sound_enabled", True))
 
         return self.actions
 

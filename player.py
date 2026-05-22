@@ -23,6 +23,7 @@ import threading
 import pyautogui
 from pynput import keyboard
 from pynput.keyboard import Key
+from sounds import play_announcement, play_announcement_sync
 
 # Safety: pyautogui will raise an exception if the cursor hits a corner
 pyautogui.FAILSAFE = True
@@ -234,8 +235,7 @@ class ActionPlayer:
                 pass  # ignore if key wasn't held
 
     def play(self, filepath: str, loops: int | None = None,
-             offset: tuple[int, int] = (0, 0),
-             auto_focus: bool = True):
+             offset: tuple[int, int] = (0, 0)):
         """
         Replay a recorded action sequence.
 
@@ -262,8 +262,7 @@ class ActionPlayer:
         loops = loops or self.config.get("loop_count", 1)
         speed = self.config.get("playback_speed", 1.0)
         delay = self.config.get("delay_between_loops", 10.0)
-        pre_delay = self.config.get("pre_attack_delay", 2.0)
-        post_delay = self.config.get("post_attack_delay", 5.0)
+
 
         total_events = len(actions)
         duration = actions[-1]["time"] if actions else 0
@@ -274,6 +273,7 @@ class ActionPlayer:
 
         self._abort.clear()
         self._start_abort_listener()
+        play_announcement_sync("loop_started", self.config.get("sound_enabled", True))
 
         try:
             for loop_idx in range(1, loops + 1):
@@ -282,23 +282,8 @@ class ActionPlayer:
 
                 print(f"[player] 🔄 Loop {loop_idx}/{loops}")
 
-                # Focus the game window
-                if auto_focus:
-                    win_offset = self._ensure_window_focus()
-                    if win_offset is None:
-                        print("[player] Skipping loop — window not found.")
-                        continue
-                    # Use window offset for coordinate correction
-                    # (0, 0) offset means coordinates are already absolute
-                    effective_offset = (offset[0], offset[1])
-                else:
-                    effective_offset = offset
+                effective_offset = offset
 
-                # Pre-attack delay
-                if pre_delay > 0:
-                    print(f"[player]    ⏳ Pre-attack delay: {pre_delay:.1f}s")
-                    if self._abort.wait(pre_delay):
-                        break
 
                 # Replay each action with timing
                 prev_time = 0.0
@@ -323,11 +308,6 @@ class ActionPlayer:
                 if self._abort.is_set():
                     break
 
-                # Post-attack delay
-                if post_delay > 0 and loop_idx < loops:
-                    print(f"[player]    ⏳ Post-attack delay: {post_delay:.1f}s")
-                    if self._abort.wait(post_delay):
-                        break
 
                 # Delay between loops
                 if loop_idx < loops and delay > 0:
@@ -342,6 +322,7 @@ class ActionPlayer:
             print("\n[player] 🛑 Replay aborted by user.")
         else:
             print(f"\n[player] ✅ All {loops} loops completed successfully!")
+        play_announcement("loop_ended", self.config.get("sound_enabled", True))
 
     def play_single(self, actions: list[dict], speed: float = 1.0,
                     offset: tuple[int, int] = (0, 0)):
@@ -364,8 +345,7 @@ class ActionPlayer:
             self._execute_action(action, speed, offset)
 
     def play_random(self, filepaths: list[str], loops: int | None = None,
-                    offset: tuple[int, int] = (0, 0),
-                    auto_focus: bool = True):
+                    offset: tuple[int, int] = (0, 0)):
         """
         Anti-detection random replay: each loop picks a random recording
         from the provided list and adds slight timing jitter.
@@ -402,8 +382,7 @@ class ActionPlayer:
         loops = loops or self.config.get("loop_count", 1)
         speed = self.config.get("playback_speed", 1.0)
         delay = self.config.get("delay_between_loops", 10.0)
-        pre_delay = self.config.get("pre_attack_delay", 2.0)
-        post_delay = self.config.get("post_attack_delay", 5.0)
+
 
         print(f"[player] 🎲 RANDOM REPLAY — {len(loaded)} recordings × {loops} loops "
               f"at {speed}x speed")
@@ -415,6 +394,7 @@ class ActionPlayer:
 
         self._abort.clear()
         self._start_abort_listener()
+        play_announcement_sync("loop_started", self.config.get("sound_enabled", True))
 
         try:
             for loop_idx in range(1, loops + 1):
@@ -427,22 +407,8 @@ class ActionPlayer:
 
                 print(f"[player] 🔄 Loop {loop_idx}/{loops} — using: {rec_name}")
 
-                # Focus the game window
-                if auto_focus:
-                    win_offset = self._ensure_window_focus()
-                    if win_offset is None:
-                        print("[player] Skipping loop — window not found.")
-                        continue
-                    effective_offset = (offset[0], offset[1])
-                else:
-                    effective_offset = offset
+                effective_offset = offset
 
-                # Pre-attack delay with random jitter (±30%)
-                jittered_pre = pre_delay * random.uniform(0.7, 1.3)
-                if jittered_pre > 0:
-                    print(f"[player]    ⏳ Pre-attack delay: {jittered_pre:.1f}s")
-                    if self._abort.wait(jittered_pre):
-                        break
 
                 # Replay each action with timing + random jitter
                 prev_time = 0.0
@@ -469,12 +435,6 @@ class ActionPlayer:
                 if self._abort.is_set():
                     break
 
-                # Post-attack delay with jitter
-                if post_delay > 0 and loop_idx < loops:
-                    jittered_post = post_delay * random.uniform(0.7, 1.3)
-                    print(f"[player]    ⏳ Post-attack delay: {jittered_post:.1f}s")
-                    if self._abort.wait(jittered_post):
-                        break
 
                 # Delay between loops with jitter
                 if loop_idx < loops and delay > 0:
@@ -490,6 +450,7 @@ class ActionPlayer:
             print("\n[player] 🛑 Replay aborted by user.")
         else:
             print(f"\n[player] ✅ All {loops} random loops completed successfully!")
+        play_announcement("loop_ended", self.config.get("sound_enabled", True))
 
 
 # ---------------------------------------------------------------------------
