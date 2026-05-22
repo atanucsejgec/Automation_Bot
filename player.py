@@ -98,12 +98,42 @@ def _find_window(title_fragment: str):
 
 
 def _focus_window(hwnd):
-    """Bring a window to the foreground."""
+    """Bring a window to the foreground without changing its size."""
     import ctypes
+    from ctypes import wintypes
+
     user32 = ctypes.windll.user32
-    # Restore if minimized
+
+    # Check current window state via GetWindowPlacement
+    class WINDOWPLACEMENT(ctypes.Structure):
+        _fields_ = [
+            ("length", ctypes.c_uint),
+            ("flags", ctypes.c_uint),
+            ("showCmd", ctypes.c_uint),
+            ("ptMinPosition", wintypes.POINT),
+            ("ptMaxPosition", wintypes.POINT),
+            ("rcNormalPosition", wintypes.RECT),
+        ]
+
+    wp = WINDOWPLACEMENT()
+    wp.length = ctypes.sizeof(WINDOWPLACEMENT)
+    user32.GetWindowPlacement(hwnd, ctypes.byref(wp))
+
+    SW_SHOWMINIMIZED = 2
+    SW_SHOWMAXIMIZED = 3
+    SW_SHOWNORMAL = 1
     SW_RESTORE = 9
-    user32.ShowWindow(hwnd, SW_RESTORE)
+
+    if wp.showCmd == SW_SHOWMINIMIZED:
+        # Window is minimized — restore to its previous state
+        user32.ShowWindow(hwnd, SW_RESTORE)
+    elif wp.showCmd == SW_SHOWMAXIMIZED:
+        # Window is maximized — keep it maximized
+        user32.ShowWindow(hwnd, SW_SHOWMAXIMIZED)
+    else:
+        # Window is in normal state — just show it as-is
+        user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+
     user32.SetForegroundWindow(hwnd)
     time.sleep(0.3)
 
@@ -332,6 +362,134 @@ class ActionPlayer:
                 time.sleep(dt)
             prev_time = action["time"]
             self._execute_action(action, speed, offset)
+
+    def play_random(self, filepaths: list[str], loops: int | None = None,
+                    offset: tuple[int, int] = (0, 0),
+                    auto_focus: bool = True):
+        """
+        Anti-detection random replay: each loop picks a random recording
+        from the provided list and adds slight timing jitter.
+
+        Parameters
+        ----------
+        filepaths : list[str]
+            List of recording JSON file paths to randomly choose from.
+        loops : int, optional
+            Total number of loops. Defaults to config["loop_count"].
+        offset : tuple[int, int]
+            Additional (dx, dy) to add to all coordinates.
+        auto_focus : bool
+            If True, find & focus the game window before each loop.
+        """
+        import random
+
+        # Pre-load all recordings
+        loaded: list[tuple[str, list[dict]]] = []
+        for fp in filepaths:
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            actions = data.get("actions", data)
+            name = os.path.basename(fp)
+            if actions:
+                loaded.append((name, actions))
+            else:
+                print(f"[player] ⚠️  Skipping empty recording: {name}")
+
+        if not loaded:
+            print("[player] ⚠️  No valid recordings to play.")
+            return
+
+        loops = loops or self.config.get("loop_count", 1)
+        speed = self.config.get("playback_speed", 1.0)
+        delay = self.config.get("delay_between_loops", 10.0)
+        pre_delay = self.config.get("pre_attack_delay", 2.0)
+        post_delay = self.config.get("post_attack_delay", 5.0)
+
+        print(f"[player] 🎲 RANDOM REPLAY — {len(loaded)} recordings × {loops} loops "
+              f"at {speed}x speed")
+        print(f"[player]    Recordings pool:")
+        for name, acts in loaded:
+            dur = acts[-1]["time"] if acts else 0
+            print(f"             • {name}  ({len(acts)} events, {dur:.1f}s)")
+        print(f"[player] Press {self.config.get('abort_hotkey', 'F8')} to abort at any time.\n")
+
+        self._abort.clear()
+        self._start_abort_listener()
+
+        try:
+            for loop_idx in range(1, loops + 1):
+                if self._abort.is_set():
+                    break
+
+                # Randomly pick a recording
+                rec_name, actions = random.choice(loaded)
+                total_events = len(actions)
+
+                print(f"[player] 🔄 Loop {loop_idx}/{loops} — using: {rec_name}")
+
+                # Focus the game window
+                if auto_focus:
+                    win_offset = self._ensure_window_focus()
+                    if win_offset is None:
+                        print("[player] Skipping loop — window not found.")
+                        continue
+                    effective_offset = (offset[0], offset[1])
+                else:
+                    effective_offset = offset
+
+                # Pre-attack delay with random jitter (±30%)
+                jittered_pre = pre_delay * random.uniform(0.7, 1.3)
+                if jittered_pre > 0:
+                    print(f"[player]    ⏳ Pre-attack delay: {jittered_pre:.1f}s")
+                    if self._abort.wait(jittered_pre):
+                        break
+
+                # Replay each action with timing + random jitter
+                prev_time = 0.0
+                for i, action in enumerate(actions):
+                    if self._abort.is_set():
+                        break
+
+                    # Time delta with ±5% jitter for anti-detection
+                    dt = (action["time"] - prev_time) / speed
+                    if dt > 0:
+                        jitter = dt * random.uniform(-0.05, 0.05)
+                        wait = max(0, dt + jitter)
+                        if self._abort.wait(wait):
+                            break
+                    prev_time = action["time"]
+
+                    self._execute_action(action, speed, effective_offset)
+
+                    # Progress indicator every 20%
+                    if (i + 1) % max(1, total_events // 5) == 0:
+                        pct = (i + 1) / total_events * 100
+                        print(f"[player]    📍 {pct:.0f}% complete ({i+1}/{total_events})")
+
+                if self._abort.is_set():
+                    break
+
+                # Post-attack delay with jitter
+                if post_delay > 0 and loop_idx < loops:
+                    jittered_post = post_delay * random.uniform(0.7, 1.3)
+                    print(f"[player]    ⏳ Post-attack delay: {jittered_post:.1f}s")
+                    if self._abort.wait(jittered_post):
+                        break
+
+                # Delay between loops with jitter
+                if loop_idx < loops and delay > 0:
+                    jittered_delay = delay * random.uniform(0.7, 1.3)
+                    print(f"[player]    💤 Waiting {jittered_delay:.1f}s before next loop...")
+                    if self._abort.wait(jittered_delay):
+                        break
+
+        finally:
+            self._stop_abort_listener()
+
+        if self._abort.is_set():
+            print("\n[player] 🛑 Replay aborted by user.")
+        else:
+            print(f"\n[player] ✅ All {loops} random loops completed successfully!")
 
 
 # ---------------------------------------------------------------------------

@@ -169,40 +169,156 @@ def action_record(config: dict):
         print("  ⚠️  No actions were recorded.\n")
 
 
+def choose_multiple_recordings(config: dict) -> list[str] | None:
+    """
+    Interactive multi-picker for recordings.
+    User enters comma-separated numbers (e.g. '1,3,5').
+    Returns list of full paths, or None if cancelled.
+    """
+    files = get_recordings(config)
+    if not files:
+        print("  ⚠️  No recordings found. Record some attacks first!\n")
+        return None
+
+    rec_dir = os.path.join(BASE_DIR, config.get("recordings_dir", "recordings"))
+
+    print("\n  Available recordings:")
+    for i, f in enumerate(files, 1):
+        fpath = os.path.join(rec_dir, f)
+        size_kb = os.path.getsize(fpath) / 1024
+        try:
+            with open(fpath, "r") as fp:
+                data = json.load(fp)
+            n_events = data.get("event_count", len(data.get("actions", [])))
+            duration = data.get("duration_sec", 0)
+            info = f"{n_events} events, {duration:.1f}s"
+        except Exception:
+            info = "?"
+        print(f"    [{i}] {f}  ({size_kb:.1f} KB — {info})")
+
+    print()
+    print("  Enter recording numbers separated by commas (e.g. 1,3,5)")
+    choice = input("  > ").strip()
+    if choice.lower() == "q":
+        return None
+
+    # Parse comma-separated numbers
+    selected: list[str] = []
+    try:
+        indices = [int(x.strip()) - 1 for x in choice.split(",") if x.strip()]
+        for idx in indices:
+            if 0 <= idx < len(files):
+                fpath = os.path.join(rec_dir, files[idx])
+                if fpath not in selected:  # avoid duplicates
+                    selected.append(fpath)
+            else:
+                print(f"  ⚠️  Skipping invalid number: {idx + 1}")
+    except ValueError:
+        print("  ❌ Invalid input. Use comma-separated numbers like: 1,3,5\n")
+        return None
+
+    if not selected:
+        print("  ❌ No valid recordings selected.\n")
+        return None
+
+    print(f"\n  ✅ Selected {len(selected)} recordings for random pool:")
+    for fp in selected:
+        print(f"     • {os.path.basename(fp)}")
+    print()
+
+    return selected
+
+
 def action_replay(config: dict):
-    """Replay a saved recording."""
+    """Replay a saved recording — single or random mode."""
     from player import ActionPlayer
 
-    filepath = choose_recording(config)
-    if not filepath:
+    files = get_recordings(config)
+    if not files:
+        print("  ⚠️  No recordings found. Record one first!\n")
         return
 
-    # Ask for loop count
-    default_loops = config.get("loop_count", 5)
-    loops_str = input(f"  Number of loops [{default_loops}]: ").strip()
-    loops = int(loops_str) if loops_str.isdigit() else default_loops
-
-    # Ask for speed
-    default_speed = config.get("playback_speed", 1.0)
-    speed_str = input(f"  Playback speed [{default_speed}x]: ").strip()
-    try:
-        speed = float(speed_str) if speed_str else default_speed
-    except ValueError:
-        speed = default_speed
-
-    # Temporarily override config
-    play_config = dict(config)
-    play_config["playback_speed"] = speed
-
-    abort_key = config.get("abort_hotkey", "F8")
-    print(f"\n  Starting replay in 3 seconds... (press {abort_key} to abort)\n")
-    for i in range(3, 0, -1):
-        print(f"    {i}...")
-        time.sleep(1)
-
-    player = ActionPlayer(play_config)
-    player.play(filepath, loops=loops)
+    # Sub-menu: Selected vs Random replay
+    print("\n  ┌───────────────────────────────────────┐")
+    print("  │         REPLAY MODE                    │")
+    print("  ├───────────────────────────────────────┤")
+    print("  │  [1]  ▶️   Selected Replay              │")
+    print("  │        (one recording, loop normally)  │")
+    print("  │                                        │")
+    print("  │  [2]  🎲  Random Replay                │")
+    print("  │        (pick multiple, shuffle each    │")
+    print("  │         loop for anti-detection)       │")
+    print("  └───────────────────────────────────────┘")
     print()
+
+    mode = input("  Select mode [1-2]: ").strip()
+
+    if mode == "1":
+        # ── Selected Replay (original behavior) ──
+        filepath = choose_recording(config)
+        if not filepath:
+            return
+
+        default_loops = config.get("loop_count", 5)
+        loops_str = input(f"  Number of loops [{default_loops}]: ").strip()
+        loops = int(loops_str) if loops_str.isdigit() else default_loops
+
+        default_speed = config.get("playback_speed", 1.0)
+        speed_str = input(f"  Playback speed [{default_speed}x]: ").strip()
+        try:
+            speed = float(speed_str) if speed_str else default_speed
+        except ValueError:
+            speed = default_speed
+
+        play_config = dict(config)
+        play_config["playback_speed"] = speed
+
+        abort_key = config.get("abort_hotkey", "F8")
+        print(f"\n  Starting replay in 3 seconds... (press {abort_key} to abort)\n")
+        for i in range(3, 0, -1):
+            print(f"    {i}...")
+            time.sleep(1)
+
+        player = ActionPlayer(play_config)
+        player.play(filepath, loops=loops)
+        print()
+
+    elif mode == "2":
+        # ── Random Replay (anti-detection) ──
+        filepaths = choose_multiple_recordings(config)
+        if not filepaths:
+            return
+
+        if len(filepaths) < 2:
+            print("  ⚠️  Random mode works best with 2+ recordings.")
+            print("     (Continuing with 1 — timing jitter will still apply)\n")
+
+        default_loops = config.get("loop_count", 5)
+        loops_str = input(f"  Total number of loops [{default_loops}]: ").strip()
+        loops = int(loops_str) if loops_str.isdigit() else default_loops
+
+        default_speed = config.get("playback_speed", 1.0)
+        speed_str = input(f"  Playback speed [{default_speed}x]: ").strip()
+        try:
+            speed = float(speed_str) if speed_str else default_speed
+        except ValueError:
+            speed = default_speed
+
+        play_config = dict(config)
+        play_config["playback_speed"] = speed
+
+        abort_key = config.get("abort_hotkey", "F8")
+        print(f"\n  🎲 Starting RANDOM replay in 3 seconds... (press {abort_key} to abort)\n")
+        for i in range(3, 0, -1):
+            print(f"    {i}...")
+            time.sleep(1)
+
+        player = ActionPlayer(play_config)
+        player.play_random(filepaths, loops=loops)
+        print()
+
+    else:
+        print("  ❌ Invalid mode. Please enter 1 or 2.\n")
 
 
 def action_list_recordings(config: dict):
