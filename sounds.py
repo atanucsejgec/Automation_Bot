@@ -49,7 +49,7 @@ $synth.Dispose()
             creationflags=subprocess.CREATE_NO_WINDOW
         )
     except Exception as e:
-        print(f"[sounds] ⚠️  Could not generate speech for '{text}': {e}")
+        print(f"[autopilot] [!] Could not generate speech for '{text}': {e}")
 
 
 def _get_wav_path(name: str) -> str:
@@ -58,7 +58,7 @@ def _get_wav_path(name: str) -> str:
     filepath = os.path.join(_SOUNDS_DIR, f"{name}.wav")
     if not os.path.exists(filepath):
         text = ANNOUNCEMENTS.get(name, name.replace("_", " "))
-        print(f"[sounds] 🔊 Generating audio for '{text}'... (one-time setup)")
+        print(f"[autopilot] Generating audio: '{text}' (one-time setup)")
         _generate_wav(text, filepath)
     return filepath
 
@@ -83,7 +83,7 @@ def play_announcement(name: str, enabled: bool = True):
             if os.path.exists(wav_path):
                 winsound.PlaySound(wav_path, winsound.SND_FILENAME)
         except Exception as e:
-            print(f"[sounds] ⚠️  Playback error: {e}")
+            print(f"[autopilot] [!] Audio playback error: {e}")
 
     # Play in a background thread so it doesn't block
     t = threading.Thread(target=_play, daemon=True)
@@ -102,7 +102,7 @@ def play_announcement_sync(name: str, enabled: bool = True):
         if os.path.exists(wav_path):
             winsound.PlaySound(wav_path, winsound.SND_FILENAME)
     except Exception as e:
-        print(f"[sounds] ⚠️  Playback error: {e}")
+        print(f"[autopilot] [!] Playback error: {e}")
 
 
 def pregenerate_all():
@@ -110,7 +110,7 @@ def pregenerate_all():
     Pre-generate all announcement WAV files.
     Call this once at startup to avoid delays during recording/playback.
     """
-    print("[sounds] 🔊 Pre-generating announcement audio files...")
+    print("[autopilot] Preparing audio files...")
     for name in ANNOUNCEMENTS:
         _get_wav_path(name)
-    print("[sounds] ✅ All audio files ready.")
+    print("[autopilot] Audio files ready.")

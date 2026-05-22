@@ -1,11 +1,11 @@
 """
-main.py — CLI entry point for the Macro Recorder & Player.
+main.py — CLI entry point for AutoPilot Desktop Automation.
 
 Provides an interactive menu to:
-  1. Record a new action sequence
+  1. Record a new automation sequence
   2. Replay a saved recording
-  3. List saved recordings
-  4. Take a screenshot (for template images)
+  3. Manage saved recordings
+  4. Capture a screenshot
   5. Edit configuration
   6. Exit
 
@@ -51,7 +51,7 @@ def save_config(config: dict):
     """Persist config to disk."""
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
-    print("  ✅ Config saved.\n")
+    print("  [OK] Settings saved.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -59,31 +59,37 @@ def save_config(config: dict):
 # ---------------------------------------------------------------------------
 
 def print_banner():
-    """Print a cool ASCII banner."""
+    """Print the application banner."""
     banner = r"""
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║       🎮  MACRO RECORDER & PLAYER  🎮                       ║
-    ║                                                              ║
-    ║       Record · Replay · Automate                             ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║                                                                  ║
+    ║       █████╗ ██╗   ██╗████████╗ ██████╗ ██████╗ ██╗██╗      ║
+    ║      ██╔══██╗██║   ██║╚══██╔══╝██╔═══██╗██╔══██╗██║██║      ║
+    ║      ███████║██║   ██║   ██║   ██║   ██║██████╔╝██║██║      ║
+    ║      ██╔══██║██║   ██║   ██║   ██║   ██║██╔═══╝ ██║██║      ║
+    ║      ██║  ██║╚██████╔╝   ██║   ╚██████╔╝██║     ██║███████╗ ║
+    ║      ╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝     ╚═╝╚══════╝ ║
+    ║                                                                  ║
+    ║              Desktop Automation Suite  v1.0                      ║
+    ║         Record · Replay · Automate — Any Application             ║
+    ║                                                                  ║
+    ╚══════════════════════════════════════════════════════════════════╝
     """
     print(banner)
 
 
 def print_menu():
     """Print the main menu."""
-    print("  ┌─────────────────────────────────────┐")
-    print("  │          MAIN MENU                   │")
-    print("  ├─────────────────────────────────────┤")
-    print("  │  [1]  🔴  Record new attack          │")
-    print("  │  [2]  ▶️   Replay a recording         │")
-    print("  │  [3]  📂  List saved recordings      │")
-    print("  │  [4]  📸  Take screenshot            │")
-    print("  │  [5]  ⚙️   Edit configuration         │")
-    print("  │  [6]  🚪  Exit                       │")
-    print("  └─────────────────────────────────────┘")
+    print("  ┌──────────────────────────────────────────┐")
+    print("  │             CONTROL  PANEL                │")
+    print("  ├──────────────────────────────────────────┤")
+    print("  │  [1]  ●  New Recording                    │")
+    print("  │  [2]  ▶  Replay Automation                │")
+    print("  │  [3]  ≡  Manage Recordings                │")
+    print("  │  [4]  □  Capture Screenshot               │")
+    print("  │  [5]  ⚙  Settings                         │")
+    print("  │  [6]  ✕  Exit                              │")
+    print("  └──────────────────────────────────────────┘")
     print()
 
 
@@ -98,10 +104,10 @@ def choose_recording(config: dict) -> str | None:
     """Interactive picker for recordings. Returns full path or None."""
     files = get_recordings(config)
     if not files:
-        print("  ⚠️  No recordings found. Record one first!\n")
+        print("  [!] No recordings found. Create one first.\n")
         return None
 
-    print("\n  Available recordings:")
+    print("\n  Available Recordings:")
     for i, f in enumerate(files, 1):
         # Show file size and preview
         fpath = os.path.join(BASE_DIR, config.get("recordings_dir", "recordings"), f)
@@ -111,13 +117,13 @@ def choose_recording(config: dict) -> str | None:
                 data = json.load(fp)
             n_events = data.get("event_count", len(data.get("actions", [])))
             duration = data.get("duration_sec", 0)
-            info = f"{n_events} events, {duration:.1f}s"
+            info = f"{n_events} actions, {duration:.1f}s"
         except Exception:
             info = "?"
         print(f"    [{i}] {f}  ({size_kb:.1f} KB — {info})")
 
     print()
-    choice = input("  Enter number (or 'q' to cancel): ").strip()
+    choice = input("  Select recording [#] or 'q' to cancel: ").strip()
     if choice.lower() == "q":
         return None
     try:
@@ -128,7 +134,7 @@ def choose_recording(config: dict) -> str | None:
             )
     except ValueError:
         pass
-    print("  ❌ Invalid selection.\n")
+    print("  [!] Invalid selection.\n")
     return None
 
 
@@ -137,21 +143,21 @@ def choose_recording(config: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 def action_record(config: dict):
-    """Record a new attack sequence."""
+    """Record a new automation sequence."""
     from recorder import ActionRecorder
 
-    name = input("  Enter a name for this recording (or Enter for auto): ").strip()
+    name = input("  Recording name (Enter for auto-generated): ").strip()
     if not name:
         from datetime import datetime
-        name = f"attack_{datetime.now():%Y%m%d_%H%M%S}"
+        name = f"automation_{datetime.now():%Y%m%d_%H%M%S}"
 
     # Make name filesystem-safe
     name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
     stop_key = config.get("recording_hotkey_stop", "F7")
     countdown = config.get("countdown_seconds", 10)
-    print(f"\n  Get ready! Recording will start in {countdown} seconds...")
-    print(f"  Press {stop_key} to stop recording.\n")
+    print(f"\n  >> Recording begins in {countdown} seconds. Prepare your workflow.")
+    print(f"  >> Press [{stop_key}] to stop recording.\n")
 
     for i in range(countdown, 0, -1):
         print(f"    {i}...")
@@ -166,7 +172,7 @@ def action_record(config: dict):
         rec_dir = os.path.join(BASE_DIR, config.get("recordings_dir", "recordings"))
         recorder.save(name, directory=rec_dir)
     else:
-        print("  ⚠️  No actions were recorded.\n")
+        print("  [!] No actions captured. Recording discarded.\n")
 
 
 def choose_multiple_recordings(config: dict) -> list[str] | None:
@@ -177,12 +183,12 @@ def choose_multiple_recordings(config: dict) -> list[str] | None:
     """
     files = get_recordings(config)
     if not files:
-        print("  ⚠️  No recordings found. Record some attacks first!\n")
+        print("  [!] No recordings found. Create some first.\n")
         return None
 
     rec_dir = os.path.join(BASE_DIR, config.get("recordings_dir", "recordings"))
 
-    print("\n  Available recordings:")
+    print("\n  Available Recordings:")
     for i, f in enumerate(files, 1):
         fpath = os.path.join(rec_dir, f)
         size_kb = os.path.getsize(fpath) / 1024
@@ -197,7 +203,7 @@ def choose_multiple_recordings(config: dict) -> list[str] | None:
         print(f"    [{i}] {f}  ({size_kb:.1f} KB — {info})")
 
     print()
-    print("  Enter recording numbers separated by commas (e.g. 1,3,5)")
+    print("  Enter recording numbers separated by commas (e.g. 1,3,5):")
     choice = input("  > ").strip()
     if choice.lower() == "q":
         return None
@@ -212,16 +218,16 @@ def choose_multiple_recordings(config: dict) -> list[str] | None:
                 if fpath not in selected:  # avoid duplicates
                     selected.append(fpath)
             else:
-                print(f"  ⚠️  Skipping invalid number: {idx + 1}")
+                print(f"  [!] Skipping invalid number: {idx + 1}")
     except ValueError:
-        print("  ❌ Invalid input. Use comma-separated numbers like: 1,3,5\n")
+        print("  [!] Invalid input. Use comma-separated numbers (e.g. 1,3,5)\n")
         return None
 
     if not selected:
-        print("  ❌ No valid recordings selected.\n")
+        print("  [!] No valid recordings selected.\n")
         return None
 
-    print(f"\n  ✅ Selected {len(selected)} recordings for random pool:")
+    print(f"\n  [OK] Selected {len(selected)} recordings for shuffle pool:")
     for fp in selected:
         print(f"     • {os.path.basename(fp)}")
     print()
@@ -230,37 +236,37 @@ def choose_multiple_recordings(config: dict) -> list[str] | None:
 
 
 def action_replay(config: dict):
-    """Replay a saved recording — single or random mode."""
+    """Replay a saved automation recording."""
     from player import ActionPlayer
 
     files = get_recordings(config)
     if not files:
-        print("  ⚠️  No recordings found. Record one first!\n")
+        print("  [!] No recordings found. Create one first.\n")
         return
 
-    # Sub-menu: Selected vs Random replay
-    print("\n  ┌───────────────────────────────────────┐")
-    print("  │         REPLAY MODE                    │")
-    print("  ├───────────────────────────────────────┤")
-    print("  │  [1]  ▶️   Selected Replay              │")
-    print("  │        (one recording, loop normally)  │")
-    print("  │                                        │")
-    print("  │  [2]  🎲  Random Replay                │")
-    print("  │        (pick multiple, shuffle each    │")
-    print("  │         loop for anti-detection)       │")
-    print("  └───────────────────────────────────────┘")
+    # Sub-menu: replay mode selection
+    print("\n  ┌──────────────────────────────────────────┐")
+    print("  │           REPLAY  MODE                    │")
+    print("  ├──────────────────────────────────────────┤")
+    print("  │  [1]  ▶  Standard Replay                  │")
+    print("  │       Run one recording in a loop          │")
+    print("  │                                            │")
+    print("  │  [2]  ⟳  Shuffle Replay                   │")
+    print("  │       Randomize across multiple recordings │")
+    print("  │       with timing variation per loop       │")
+    print("  └──────────────────────────────────────────┘")
     print()
 
-    mode = input("  Select mode [1-2]: ").strip()
+    mode = input("  Select replay mode [1-2]: ").strip()
 
     if mode == "1":
-        # ── Selected Replay (original behavior) ──
+        # ── Standard Replay ──
         filepath = choose_recording(config)
         if not filepath:
             return
 
         default_loops = config.get("loop_count", 5)
-        loops_str = input(f"  Number of loops [{default_loops}]: ").strip()
+        loops_str = input(f"  Loop count [{default_loops}]: ").strip()
         loops = int(loops_str) if loops_str.isdigit() else default_loops
 
         default_speed = config.get("playback_speed", 1.0)
@@ -275,7 +281,7 @@ def action_replay(config: dict):
 
         abort_key = config.get("abort_hotkey", "F8")
         countdown = config.get("countdown_seconds", 10)
-        print(f"\n  Starting replay in {countdown} seconds... (press {abort_key} to abort)\n")
+        print(f"\n  >> Automation starts in {countdown}s. Press [{abort_key}] to abort.\n")
         for i in range(countdown, 0, -1):
             print(f"    {i}...")
             time.sleep(1)
@@ -285,17 +291,17 @@ def action_replay(config: dict):
         print()
 
     elif mode == "2":
-        # ── Random Replay (anti-detection) ──
+        # ── Shuffle Replay ──
         filepaths = choose_multiple_recordings(config)
         if not filepaths:
             return
 
         if len(filepaths) < 2:
-            print("  ⚠️  Random mode works best with 2+ recordings.")
-            print("     (Continuing with 1 — timing jitter will still apply)\n")
+            print("  [!] Shuffle mode works best with 2+ recordings.")
+            print("     (Continuing with 1 — timing variation still applies)\n")
 
         default_loops = config.get("loop_count", 5)
-        loops_str = input(f"  Total number of loops [{default_loops}]: ").strip()
+        loops_str = input(f"  Total loop count [{default_loops}]: ").strip()
         loops = int(loops_str) if loops_str.isdigit() else default_loops
 
         default_speed = config.get("playback_speed", 1.0)
@@ -310,7 +316,7 @@ def action_replay(config: dict):
 
         abort_key = config.get("abort_hotkey", "F8")
         countdown = config.get("countdown_seconds", 10)
-        print(f"\n  🎲 Starting RANDOM replay in {countdown} seconds... (press {abort_key} to abort)\n")
+        print(f"\n  >> Shuffle replay starts in {countdown}s. Press [{abort_key}] to abort.\n")
         for i in range(countdown, 0, -1):
             print(f"    {i}...")
             time.sleep(1)
@@ -320,17 +326,17 @@ def action_replay(config: dict):
         print()
 
     else:
-        print("  ❌ Invalid mode. Please enter 1 or 2.\n")
+        print("  [!] Invalid mode. Enter 1 or 2.\n")
 
 
 def action_list_recordings(config: dict):
-    """Show all saved recordings with details."""
+    """Display and manage saved recordings."""
     files = get_recordings(config)
     if not files:
-        print("  📭 No recordings found.\n")
+        print("  [!] No recordings found.\n")
         return
 
-    print(f"\n  {'Name':<30} {'Events':>8} {'Duration':>10} {'Size':>8} {'Date'}")
+    print(f"\n  {'Name':<30} {'Actions':>8} {'Duration':>10} {'Size':>8} {'Recorded'}")
     print(f"  {'─'*30} {'─'*8} {'─'*10} {'─'*8} {'─'*20}")
 
     rec_dir = os.path.join(BASE_DIR, config.get("recordings_dir", "recordings"))
@@ -350,33 +356,33 @@ def action_list_recordings(config: dict):
     print()
 
     # Offer delete option
-    choice = input("  Delete a recording? (enter number, or Enter to skip): ").strip()
+    choice = input("  Delete a recording? Enter [#] or press Enter to skip: ").strip()
     if choice.isdigit():
         idx = int(choice) - 1
         if 0 <= idx < len(files):
             fpath = os.path.join(rec_dir, files[idx])
-            confirm = input(f"  Really delete {files[idx]}? (y/N): ").strip().lower()
+            confirm = input(f"  Confirm delete '{files[idx]}'? [y/N]: ").strip().lower()
             if confirm == "y":
                 os.remove(fpath)
-                print(f"  🗑️  Deleted {files[idx]}\n")
+                print(f"  [OK] Deleted: {files[idx]}\n")
             else:
-                print("  Cancelled.\n")
+                print("  [--] Cancelled.\n")
 
 
 def action_screenshot(config: dict):
-    """Take a screenshot for creating template images."""
+    """Capture a screenshot for reference or template matching."""
     from image_matcher import ImageMatcher
 
     templates_dir = os.path.join(BASE_DIR, "templates")
     os.makedirs(templates_dir, exist_ok=True)
 
-    name = input("  Screenshot name (e.g. 'attack_button'): ").strip()
+    name = input("  Screenshot name (e.g. 'login_screen'): ").strip()
     if not name:
         from datetime import datetime
         name = f"screen_{datetime.now():%Y%m%d_%H%M%S}"
     name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
-    print("  📸 Capturing screen in 3 seconds... (switch to game window!)\n")
+    print("  >> Capturing screen in 3 seconds. Switch to your target window.\n")
     for i in range(3, 0, -1):
         print(f"    {i}...")
         time.sleep(1)
@@ -384,13 +390,13 @@ def action_screenshot(config: dict):
     matcher = ImageMatcher(config)
     filepath = os.path.join(templates_dir, f"{name}.png")
     matcher.save_screenshot(filepath)
-    print(f"  Saved to: {filepath}\n")
-    print("  TIP: Crop this image to just the UI element you want to match.\n")
+    print(f"  [OK] Saved: {filepath}\n")
+    print("  TIP: Crop this image to isolate the UI element you need to match.\n")
 
 
 def action_edit_config(config: dict) -> dict:
-    """Interactively edit configuration values."""
-    print("\n  Current configuration:")
+    """Interactively edit configuration settings."""
+    print("\n  Current Settings:")
     print("  " + "─" * 45)
     editable = [
         ("loop_count",          "Loop count",           int),
@@ -407,7 +413,7 @@ def action_edit_config(config: dict) -> dict:
         val = config.get(key, "?")
         print(f"    [{i:>2}] {label:<28} = {val}")
 
-    print(f"\n  Enter the number to edit, or 'q' to go back.")
+    print(f"\n  Enter [#] to edit a setting, or 'q' to return.")
     choice = input("  > ").strip()
     if choice.lower() == "q":
         return config
@@ -427,7 +433,7 @@ def action_edit_config(config: dict) -> dict:
             else:
                 print("  No change.\n")
     except (ValueError, TypeError) as e:
-        print(f"  ❌ Invalid input: {e}\n")
+        print(f"  [!] Invalid input: {e}\n")
 
     return config
 
@@ -451,7 +457,7 @@ def main():
 
     while True:
         print_menu()
-        choice = input("  Select an option [1-6]: ").strip()
+        choice = input("  Select [1-6]: ").strip()
 
         if choice == "1":
             action_record(config)
@@ -464,10 +470,10 @@ def main():
         elif choice == "5":
             config = action_edit_config(config)
         elif choice == "6":
-            print("\n  👋 Goodbye! Happy clashing!\n")
+            print("\n  Session ended. Goodbye.\n")
             break
         else:
-            print("  ❌ Invalid option. Please enter 1-6.\n")
+            print("  [!] Invalid option. Enter 1-6.\n")
 
 
 if __name__ == "__main__":

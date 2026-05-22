@@ -3,15 +3,14 @@ player.py — Replays recorded action sequences using pyautogui.
 
 Handles:
   • Precise timing between events (respects playback_speed multiplier)
-  • Window focus verification before each loop
-  • Coordinate offset correction if the game window has moved
+  • Coordinate offset correction
   • Abort hotkey (F8 by default) to emergency-stop mid-replay
   • Loop count with configurable delay between iterations
 
 Usage:
     from player import ActionPlayer
     player = ActionPlayer(config)
-    player.play("recordings/my_attack.json", loops=5)
+    player.play("recordings/my_workflow.json", loops=5)
 """
 
 import json
@@ -164,7 +163,7 @@ class ActionPlayer:
         """Start a background keyboard listener that watches for the abort key."""
         def on_press(key):
             if key == self._abort_key:
-                print(f"\n[player] ⚠️  Abort hotkey pressed! Stopping replay...")
+                print(f"\n[autopilot] !! Abort hotkey pressed. Stopping replay...")
                 self._abort.set()
                 return False  # stop listener
         self._abort_listener = keyboard.Listener(on_press=on_press)
@@ -187,7 +186,7 @@ class ActionPlayer:
         title = self.config.get("target_window_title", "Google Play Games")
         hwnd, rect = _find_window(title)
         if hwnd is None:
-            print(f"[player] ❌ Window '{title}' not found. Is the game running?")
+            print(f"[autopilot] !! Target window not found.")
             return None
         _focus_window(hwnd)
         return (rect[0], rect[1])
@@ -204,7 +203,6 @@ class ActionPlayer:
             x, y = action["x"] + ox, action["y"] + oy
             btn = action.get("button", "left")
             pressed = action.get("pressed", True)
-            # Move to position first
             pyautogui.moveTo(x, y, duration=move_dur)
             if pressed:
                 pyautogui.mouseDown(x, y, button=btn)
@@ -218,21 +216,103 @@ class ActionPlayer:
         elif atype == "scroll":
             x, y = action["x"] + ox, action["y"] + oy
             pyautogui.moveTo(x, y, duration=move_dur * 0.3)
-            pyautogui.scroll(action.get("dy", 0), x, y)
+
+            # Prefer raw deltas (exact WHEEL_DELTA units from raw hook)
+            raw_dy = action.get("raw_dy")
+            raw_dx = action.get("raw_dx")
+
+            if raw_dy is not None or raw_dx is not None:
+                # New format — send exact raw delta via Win32 API
+                self._send_raw_scroll(raw_dx or 0, raw_dy or 0)
+            else:
+                # Old format — normalized values, use pyautogui
+                dy = action.get("dy", 0)
+                if dy != 0:
+                    pyautogui.scroll(dy, x, y)
+                dx = action.get("dx", 0)
+                if dx != 0:
+                    pyautogui.hscroll(dx, x, y)
 
         elif atype == "key_down":
-            key_str = action["key"]
-            try:
-                pyautogui.keyDown(key_str)
-            except Exception:
-                pyautogui.press(key_str)
+            self._send_key(action["key"], down=True)
 
         elif atype == "key_up":
-            key_str = action["key"]
+            self._send_key(action["key"], down=False)
+
+    def _send_key(self, key_str: str, down: bool = True):
+        """
+        Send a key press or release using pyautogui.
+        Falls back to direct win32 SendInput for VK codes.
+        """
+        # Handle VK code keys like <186>
+        if key_str.startswith("<") and key_str.endswith(">"):
             try:
+                vk = int(key_str[1:-1])
+                self._send_vk(vk, down)
+                return
+            except (ValueError, Exception):
+                return
+
+        # Use pyautogui for named keys
+        try:
+            if down:
+                pyautogui.keyDown(key_str)
+            else:
                 pyautogui.keyUp(key_str)
-            except Exception:
-                pass  # ignore if key wasn't held
+        except Exception:
+            # Last resort: try pressing the key if down/up fails
+            if down:
+                try:
+                    pyautogui.press(key_str)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _send_vk(vk: int, down: bool):
+        """Send a virtual key code directly via win32 SendInput."""
+        import ctypes
+        from ctypes import wintypes
+
+        KEYEVENTF_KEYUP = 0x0002
+        INPUT_KEYBOARD = 1
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ]
+
+        class INPUT(ctypes.Structure):
+            class _INPUT(ctypes.Union):
+                _fields_ = [("ki", KEYBDINPUT)]
+            _fields_ = [
+                ("type", wintypes.DWORD),
+                ("_input", _INPUT),
+            ]
+
+        flags = KEYEVENTF_KEYUP if not down else 0
+        ki = KEYBDINPUT(wVk=vk, wScan=0, dwFlags=flags, time=0, dwExtraInfo=None)
+        inp = INPUT(type=INPUT_KEYBOARD)
+        inp._input.ki = ki
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+    @staticmethod
+    def _send_raw_scroll(raw_dx: int, raw_dy: int):
+        """
+        Send a scroll event with the exact raw delta via Win32 mouse_event.
+        This preserves trackpad precision and mouse wheel acceleration.
+        """
+        import ctypes
+        MOUSEEVENTF_WHEEL  = 0x0800
+        MOUSEEVENTF_HWHEEL = 0x1000
+
+        if raw_dy != 0:
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, raw_dy, 0)
+        if raw_dx != 0:
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, raw_dx, 0)
 
     def play(self, filepath: str, loops: int | None = None,
              offset: tuple[int, int] = (0, 0)):
@@ -247,8 +327,6 @@ class ActionPlayer:
             Number of replay loops.  Defaults to config["loop_count"].
         offset : tuple[int, int]
             Additional (dx, dy) to add to all coordinates.
-        auto_focus : bool
-            If True, find & focus the game window before each loop.
         """
         # Load recording
         with open(filepath, "r", encoding="utf-8") as f:
@@ -256,7 +334,7 @@ class ActionPlayer:
         actions = data.get("actions", data)
 
         if not actions:
-            print("[player] ⚠️  Recording is empty, nothing to play.")
+            print("[autopilot] [!] Recording is empty. Nothing to play.")
             return
 
         loops = loops or self.config.get("loop_count", 1)
@@ -267,9 +345,9 @@ class ActionPlayer:
         total_events = len(actions)
         duration = actions[-1]["time"] if actions else 0
 
-        print(f"[player] ▶️  Replaying {total_events} events ({duration:.1f}s) × {loops} loops "
+        print(f"[autopilot] >> Replaying {total_events} actions ({duration:.1f}s) x {loops} loops "
               f"at {speed}x speed")
-        print(f"[player] Press {self.config.get('abort_hotkey', 'F8')} to abort at any time.\n")
+        print(f"[autopilot] >> Press [{self.config.get('abort_hotkey', 'F8')}] to abort.\n")
 
         self._abort.clear()
         self._start_abort_listener()
@@ -280,7 +358,7 @@ class ActionPlayer:
                 if self._abort.is_set():
                     break
 
-                print(f"[player] 🔄 Loop {loop_idx}/{loops}")
+                print(f"[autopilot] -- Loop {loop_idx}/{loops}")
 
                 effective_offset = offset
 
@@ -303,7 +381,7 @@ class ActionPlayer:
                     # Progress indicator every 20% of events
                     if (i + 1) % max(1, total_events // 5) == 0:
                         pct = (i + 1) / total_events * 100
-                        print(f"[player]    📍 {pct:.0f}% complete ({i+1}/{total_events})")
+                        print(f"[autopilot]    {pct:.0f}% ({i+1}/{total_events})")
 
                 if self._abort.is_set():
                     break
@@ -311,7 +389,7 @@ class ActionPlayer:
 
                 # Delay between loops
                 if loop_idx < loops and delay > 0:
-                    print(f"[player]    💤 Waiting {delay:.1f}s before next loop...")
+                    print(f"[autopilot]    Interval: {delay:.1f}s before next loop...")
                     if self._abort.wait(delay):
                         break
 
@@ -319,9 +397,9 @@ class ActionPlayer:
             self._stop_abort_listener()
 
         if self._abort.is_set():
-            print("\n[player] 🛑 Replay aborted by user.")
+            print("\n[autopilot] Replay aborted by user.")
         else:
-            print(f"\n[player] ✅ All {loops} loops completed successfully!")
+            print(f"\n[autopilot] All {loops} loops completed successfully.")
         play_announcement("loop_ended", self.config.get("sound_enabled", True))
 
     def play_single(self, actions: list[dict], speed: float = 1.0,
@@ -347,8 +425,8 @@ class ActionPlayer:
     def play_random(self, filepaths: list[str], loops: int | None = None,
                     offset: tuple[int, int] = (0, 0)):
         """
-        Anti-detection random replay: each loop picks a random recording
-        from the provided list and adds slight timing jitter.
+        Shuffle replay: each loop picks a random recording
+        from the provided list and adds slight timing variation.
 
         Parameters
         ----------
@@ -358,8 +436,6 @@ class ActionPlayer:
             Total number of loops. Defaults to config["loop_count"].
         offset : tuple[int, int]
             Additional (dx, dy) to add to all coordinates.
-        auto_focus : bool
-            If True, find & focus the game window before each loop.
         """
         import random
 
@@ -373,10 +449,10 @@ class ActionPlayer:
             if actions:
                 loaded.append((name, actions))
             else:
-                print(f"[player] ⚠️  Skipping empty recording: {name}")
+                print(f"[autopilot] [!] Skipping empty recording: {name}")
 
         if not loaded:
-            print("[player] ⚠️  No valid recordings to play.")
+            print("[autopilot] [!] No valid recordings to play.")
             return
 
         loops = loops or self.config.get("loop_count", 1)
@@ -384,13 +460,13 @@ class ActionPlayer:
         delay = self.config.get("delay_between_loops", 10.0)
 
 
-        print(f"[player] 🎲 RANDOM REPLAY — {len(loaded)} recordings × {loops} loops "
+        print(f"[autopilot] >> Shuffle Replay — {len(loaded)} recordings x {loops} loops "
               f"at {speed}x speed")
-        print(f"[player]    Recordings pool:")
+        print(f"[autopilot]    Recording pool:")
         for name, acts in loaded:
             dur = acts[-1]["time"] if acts else 0
-            print(f"             • {name}  ({len(acts)} events, {dur:.1f}s)")
-        print(f"[player] Press {self.config.get('abort_hotkey', 'F8')} to abort at any time.\n")
+            print(f"               - {name}  ({len(acts)} actions, {dur:.1f}s)")
+        print(f"[autopilot] >> Press [{self.config.get('abort_hotkey', 'F8')}] to abort.\n")
 
         self._abort.clear()
         self._start_abort_listener()
@@ -405,7 +481,7 @@ class ActionPlayer:
                 rec_name, actions = random.choice(loaded)
                 total_events = len(actions)
 
-                print(f"[player] 🔄 Loop {loop_idx}/{loops} — using: {rec_name}")
+                print(f"[autopilot] -- Loop {loop_idx}/{loops} — using: {rec_name}")
 
                 effective_offset = offset
 
@@ -430,7 +506,7 @@ class ActionPlayer:
                     # Progress indicator every 20%
                     if (i + 1) % max(1, total_events // 5) == 0:
                         pct = (i + 1) / total_events * 100
-                        print(f"[player]    📍 {pct:.0f}% complete ({i+1}/{total_events})")
+                        print(f"[autopilot]    {pct:.0f}% ({i+1}/{total_events})")
 
                 if self._abort.is_set():
                     break
@@ -439,7 +515,7 @@ class ActionPlayer:
                 # Delay between loops with jitter
                 if loop_idx < loops and delay > 0:
                     jittered_delay = delay * random.uniform(0.7, 1.3)
-                    print(f"[player]    💤 Waiting {jittered_delay:.1f}s before next loop...")
+                    print(f"[autopilot]    Interval: {jittered_delay:.1f}s before next loop...")
                     if self._abort.wait(jittered_delay):
                         break
 
@@ -447,9 +523,9 @@ class ActionPlayer:
             self._stop_abort_listener()
 
         if self._abort.is_set():
-            print("\n[player] 🛑 Replay aborted by user.")
+            print("\n[autopilot] Replay aborted by user.")
         else:
-            print(f"\n[player] ✅ All {loops} random loops completed successfully!")
+            print(f"\n[autopilot] All {loops} shuffle loops completed successfully.")
         play_announcement("loop_ended", self.config.get("sound_enabled", True))
 
 
