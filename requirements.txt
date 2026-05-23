@@ -1,4 +1,4 @@
-# Clash Bot — Python dependencies
+# Automation Bot — Python dependencies
 # Install with:  pip install -r requirements.txt
 
 pyautogui>=0.9.54
